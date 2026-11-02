@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pathfinder Jobs</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="auth-page" id="authPage" hidden>
+    <div class="auth-card">
+      <div class="brand">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--ink)"/><path d="M8 23 L16 8 L24 23" fill="none" stroke="var(--accent)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16" cy="19" r="2.4" fill="var(--bg)"/></svg>
+        Pathfinder Jobs
+      </div>
+      <h1 id="authTitle">Welcome back</h1>
+      <p id="authDescription">Sign in to find jobs matched to your skills.</p>
+      <form id="authForm">
+        <label class="auth-label" for="authEmail">Email</label>
+        <input id="authEmail" type="email" autocomplete="email" maxlength="254" required>
+        <label class="auth-label" for="authPassword">Password</label>
+        <input id="authPassword" type="password" autocomplete="current-password" minlength="8" maxlength="128" required>
+        <p class="auth-message" id="authMessage" aria-live="polite"></p>
+        <button class="auth-submit" id="authSubmit" type="submit">Sign in</button>
+      </form>
+      <p class="auth-switch"><span id="authSwitchText">New to Pathfinder?</span> <button type="button" id="authSwitch">Create an account</button></p>
+    </div>
+  </main>
+
+  <div class="wrap" id="appContent" hidden>
+    <header class="top">
+      <div class="brand">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--ink)"/><path d="M8 23 L16 8 L24 23" fill="none" stroke="var(--accent)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16" cy="19" r="2.4" fill="var(--bg)"/></svg>
+        Pathfinder Jobs
+      </div>
+      <nav><a href="#finder">Find jobs</a><a href="#how">How it works</a><span class="account-email" id="accountEmail"></span><button class="sign-out" id="logout" type="button">Sign out</button></nav>
+    </header>
+
+    <div class="hero">
+      <h1>Jobs ranked by how well <mark>your skills</mark> fit them.</h1>
+      <p>Add the skills you have. Pathfinder scores every opening, shows which requirements you already meet, and tells you which missing skills would open the most doors.</p>
+    </div>
+
+    <div class="app" id="finder">
+      <aside class="panel" aria-label="Your profile">
+        <h2>Your profile</h2>
+
+        <div class="field">
+          <label class="l" for="skillIn">Skills</label>
+          <input type="text" id="skillIn" list="skillList" placeholder="Type a skill and press Enter" autocomplete="off">
+          <datalist id="skillList"></datalist>
+          <div class="chips" id="mySkills" aria-label="Selected skills"></div>
+          <div class="l" style="margin-top:12px">Quick add</div>
+          <div class="chips" id="sugSkills"></div>
+        </div>
+
+        <div class="field">
+          <label class="l" for="exp">Experience <span class="rangeval" id="expVal"></span></label>
+          <input type="range" id="exp" min="0" max="10" step="1" value="0">
+        </div>
+
+        <div class="field">
+          <label class="l" for="city">Preferred city</label>
+          <select id="city"></select>
+        </div>
+
+        <div class="field">
+          <div class="l">Work style</div>
+          <div class="seg" id="mode" role="group" aria-label="Work style">
+            <button type="button" data-v="Any" aria-pressed="true">Any</button>
+            <button type="button" data-v="Onsite" aria-pressed="false">Onsite</button>
+            <button type="button" data-v="Hybrid" aria-pressed="false">Hybrid</button>
+            <button type="button" data-v="Remote" aria-pressed="false">Remote</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="l" for="sal">Minimum salary <span class="rangeval" id="salVal"></span></label>
+          <input type="range" id="sal" min="0" max="40" step="1" value="0">
+        </div>
+
+        <button class="reset" id="reset" type="button">Reset profile</button>
+      </aside>
+
+      <main>
+        <div class="results-head">
+          <h2>Your matches</h2>
+          <span id="resCount"></span>
+        </div>
+        <div class="gap-box" id="gapBox" hidden></div>
+        <div class="legend" id="legend">
+          <span><i style="background:var(--good)"></i>Skill you have</span>
+          <span><i style="border:1px solid var(--line)"></i>Skill you lack</span>
+          <span><i style="border:1px dashed var(--ink-soft)"></i>Dashed = nice to have</span>
+        </div>
+        <div id="results" aria-live="polite"></div>
+      </main>
+    </div>
+
+    <section class="how" id="how">
+      <h2>How the recommendations are made</h2>
+      <p>Each job is compared with your profile by the Flask backend and given a score from 0 to 100. The list is sorted by that score. Open "Why this score" on any job to see each part.</p>
+      <div class="steps">
+        <div class="step"><h3>1. Skill overlap</h3><p>Required skills count double, nice-to-have skills count once. This is blended with a TF-IDF cosine similarity, so rare skills count for more than common ones.</p></div>
+        <div class="step"><h3>2. Experience fit</h3><p>Full marks inside the job's experience range. The score drops for each year you are under or over it.</p></div>
+        <div class="step"><h3>3. Location and salary</h3><p>Remote jobs and jobs in your city score highest. Salary scores full when the top of the range reaches your minimum.</p></div>
+        <div class="step"><h3>4. Skill gaps</h3><p>Missing required skills are counted across your best matches. The ones that appear most are the quickest way to raise your scores.</p></div>
+      </div>
+      <div class="formula">
+        match = <b>0.60</b> × skills + <b>0.20</b> × experience + <b>0.10</b> × location + <b>0.10</b> × salary<br>
+        skills = <b>0.7</b> × weighted overlap + <b>0.3</b> × TF-IDF cosine
+      </div>
+      <p class="note">The openings are example data with made-up companies, stored in backend/data/jobs.json.</p>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
