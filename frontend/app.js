@@ -1,7 +1,7 @@
 // Frontend logic. All scoring happens in the Flask backend (POST /api/recommend).
 
 // Served by Flask -> same origin. Opened via Live Server / file -> call Flask on port 8000.
-const API_BASE = location.port === "8000" ? "" : "http://localhost:8000";
+const API_BASE = "";
 
 const DEFAULT = { skills: ["Python", "SQL", "Machine Learning", "Git"], exp: 0, city: "Bengaluru", mode: "Any", sal: 0 };
 let state = JSON.parse(JSON.stringify(DEFAULT));
