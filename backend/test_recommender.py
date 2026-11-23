@@ -317,6 +317,59 @@ class ApiTests(unittest.TestCase):
             200,
         )
 
+    def test_csrf_tokens_guard_registration_login_logout_and_other_mutations(self):
+        origin = "http://localhost:8000"
+        payload = {"email": "csrf@example.com", "password": "password123"}
+        self.assertEqual(
+            self.client.post(
+                "/api/register",
+                json=payload,
+                headers={"Origin": origin},
+            ).status_code,
+            403,
+        )
+
+        csrf = self.client.get("/api/csrf").get_json()["token"]
+        valid_headers = {"Origin": origin, "X-CSRF-Token": csrf}
+        self.assertEqual(
+            self.client.post(
+                "/api/register",
+                json=payload,
+                headers={**valid_headers, "X-CSRF-Token": "invalid"},
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post("/api/register", json=payload, headers=valid_headers).status_code,
+            201,
+        )
+
+        authenticated_token = self.client.get("/api/csrf").get_json()["token"]
+        self.assertNotEqual(authenticated_token, csrf)
+        self.assertEqual(
+            self.client.post(
+                "/api/logout",
+                headers={"Origin": origin, "X-CSRF-Token": authenticated_token},
+            ).status_code,
+            200,
+        )
+
+        anonymous_token = self.client.get("/api/csrf").get_json()["token"]
+        login = self.client.post(
+            "/api/login",
+            json=payload,
+            headers={"Origin": origin, "X-CSRF-Token": anonymous_token},
+        )
+        self.assertEqual(login.status_code, 200)
+
+        login_token = self.client.get("/api/csrf").get_json()["token"]
+        recommendation = self.client.post(
+            "/api/recommend",
+            json={"skills": ["Python"]},
+            headers={"Origin": origin, "X-CSRF-Token": login_token},
+        )
+        self.assertEqual(recommendation.status_code, 200)
+
     def test_authenticated_sessions_are_permanent_and_cookie_is_http_only(self):
         response = self.client.post(
             "/api/register",

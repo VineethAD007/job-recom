@@ -13,7 +13,7 @@ const DEFAULT_PROFILE = {
 
 let state = structuredClone(DEFAULT_PROFILE);
 let profileKey = "";
-let csrfToken = "";
+let csrfTokenRequest = null;
 let allSkills = [];
 let allCities = [];
 let interactions = {};
@@ -44,14 +44,33 @@ function esc(value) {
 
 async function apiFetch(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  if (options.method && options.method !== "GET") {
-    headers.set("X-CSRF-Token", csrfToken);
+  const method = String(options.method || "GET").toUpperCase();
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    headers.set("X-CSRF-Token", await refreshCsrfToken());
   }
   return fetch(API_BASE + path, {
     ...options,
     headers,
     credentials: "include",
   });
+}
+
+async function refreshCsrfToken() {
+  if (!csrfTokenRequest) {
+    csrfTokenRequest = (async () => {
+      const response = await fetch(`${API_BASE}/api/csrf`, { credentials: "include" });
+      const data = await readJson(response);
+      if (typeof data.token !== "string" || !data.token) {
+        throw new Error("Could not retrieve a valid CSRF token.");
+      }
+      return data.token;
+    })();
+  }
+  try {
+    return await csrfTokenRequest;
+  } finally {
+    csrfTokenRequest = null;
+  }
 }
 
 async function readJson(response) {
@@ -897,8 +916,7 @@ async function initializeApp(email) {
   $("appContent").hidden = false;
 
   try {
-    const csrfData = await readJson(await apiFetch("/api/csrf"));
-    csrfToken = csrfData.token;
+    await refreshCsrfToken();
     const [skills, cities, saved, profileResponse, applicationData] = await Promise.all([
       readJson(await apiFetch("/api/skills")),
       readJson(await apiFetch("/api/cities")),
@@ -953,8 +971,7 @@ async function initializeApp(email) {
 
 async function checkSession() {
   try {
-    const csrfData = await readJson(await apiFetch("/api/csrf"));
-    csrfToken = csrfData.token;
+    await refreshCsrfToken();
     const session = await readJson(await apiFetch("/api/session"));
     if (session.authenticated) {
       profileKey = `pathfinder-profile:${session.email}`;
