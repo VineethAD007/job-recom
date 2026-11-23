@@ -3,118 +3,318 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pathfinder Jobs</title>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+  <meta name="theme-color" content="#090d1f">
+  <title>Pathfinder Jobs - AI job recommendations</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main class="auth-page" id="authPage" hidden>
-    <div class="auth-card">
-      <div class="brand">
-        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--ink)"/><path d="M8 23 L16 8 L24 23" fill="none" stroke="var(--accent)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16" cy="19" r="2.4" fill="var(--bg)"/></svg>
-        Pathfinder Jobs
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <main class="landing" id="landingPage" hidden>
+    <header class="landing-nav">
+      <button class="brand brand-button" type="button" data-route="landing" aria-label="Pathfinder Jobs home">
+        <span class="brand-mark" aria-hidden="true"><span>P</span></span>
+        <span>Pathfinder<span class="brand-accent">Jobs</span></span>
+      </button>
+      <nav class="landing-actions" aria-label="Landing navigation">
+        <button class="text-button" type="button" data-auth-mode="login">Login</button>
+        <button class="primary-button small" type="button" data-auth-mode="register">Get started <span aria-hidden="true">→</span></button>
+      </nav>
+    </header>
+
+    <section class="hero-section">
+      <div class="hero-copy">
+        <span class="eyebrow"><span class="eyebrow-dot"></span> AI-powered career matching</span>
+        <h1>Find the role that <span>fits your future.</span></h1>
+        <p>Pathfinder ranks real profile openings by your skills, experience, location and salary goals - with transparent match analysis.</p>
+        <div class="hero-actions">
+          <button class="primary-button" type="button" data-auth-mode="register">Discover my matches <span aria-hidden="true">→</span></button>
+          <button class="secondary-button" type="button" data-auth-mode="login">Sign in</button>
+        </div>
+        <div class="hero-proof">
+          <div class="proof-avatars" aria-hidden="true"><span>ML</span><span>DA</span><span>FE</span></div>
+          <p><strong id="openingCount">Checking current openings</strong><br>Available in the current dataset</p>
+        </div>
       </div>
-      <h1 id="authTitle">Welcome back</h1>
-      <p id="authDescription">Sign in to find jobs matched to your skills.</p>
-      <form id="authForm">
-        <label class="auth-label" for="authEmail">Email</label>
-        <input id="authEmail" type="email" autocomplete="email" maxlength="254" required>
-        <label class="auth-label" for="authPassword">Password</label>
-        <input id="authPassword" type="password" autocomplete="current-password" minlength="8" maxlength="128" required>
-        <p class="auth-message" id="authMessage" aria-live="polite"></p>
-        <button class="auth-submit" id="authSubmit" type="submit">Sign in</button>
-      </form>
-      <p class="auth-switch"><span id="authSwitchText">New to Pathfinder?</span> <button type="button" id="authSwitch">Create an account</button></p>
+
+      <div class="hero-visual" aria-label="AI job match preview">
+        <div class="orbit orbit-one"></div>
+        <div class="orbit orbit-two"></div>
+        <div class="preview-card preview-main">
+          <div class="preview-card-head">
+            <div class="company-logo">NF</div>
+            <span class="preview-status">Sample listing</span>
+          </div>
+          <h2>Machine Learning Engineer</h2>
+          <p>Nimbus Analytics · Bengaluru · Hybrid</p>
+          <div class="preview-salary">₹12–22 LPA</div>
+          <div class="match-preview">
+            <div class="match-ring"><span>AI</span><small>match</small></div>
+            <div><strong>Match insights</strong><span>Skills · Experience · Location</span></div>
+          </div>
+        </div>
+        <div class="preview-card preview-float preview-skill">
+          <span class="float-icon">✓</span>
+          <div><strong>Skills matched</strong><small>Python · ML · SQL</small></div>
+        </div>
+        <div class="preview-card preview-float preview-gap">
+          <span class="float-icon amber">◎</span>
+          <div><strong>Growth areas</strong><small>Skills to learn next</small></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="feature-strip" aria-label="Platform features">
+      <article><span class="feature-icon">✦</span><div><strong>AI-powered matching</strong><p>Weighted skill and profile scoring</p></div></article>
+      <article><span class="feature-icon blue">◎</span><div><strong>Transparent results</strong><p>See every factor behind a match</p></div></article>
+      <article><span class="feature-icon cyan">⌁</span><div><strong>Skill gap insights</strong><p>Discover the fastest next steps</p></div></article>
+    </section>
+
+    <section class="landing-how" id="how">
+      <span class="section-label">How it works</span>
+      <h2>A clearer path to your next role</h2>
+      <div class="landing-steps">
+        <article><span>01</span><h3>Build your profile</h3><p>Add your skills, experience, preferred location and work style.</p></article>
+        <article><span>02</span><h3>See the fit</h3><p>Pathfinder compares your profile with each opening and explains the score.</p></article>
+        <article><span>03</span><h3>Take the next step</h3><p>Save promising roles and identify the skills that could improve future matches.</p></article>
+      </div>
+    </section>
+  </main>
+
+  <main class="auth-page" id="authPage" hidden>
+    <div class="auth-shell">
+      <section class="auth-brand-panel">
+        <button class="brand brand-button" type="button" data-route="landing">
+          <span class="brand-mark" aria-hidden="true"><span>P</span></span>
+          <span>Pathfinder<span class="brand-accent">Jobs</span></span>
+        </button>
+        <div class="auth-brand-copy">
+          <span class="eyebrow"><span class="eyebrow-dot"></span> Your career, clearly mapped</span>
+          <h2>Find work that matches where you are and where you want to go.</h2>
+        </div>
+      </section>
+      <section class="auth-form-panel">
+        <button class="auth-close" type="button" data-route="landing" aria-label="Close authentication">×</button>
+        <div class="auth-card">
+          <span class="auth-kicker" id="authKicker">Welcome back</span>
+          <h1 id="authTitle">Sign in to Pathfinder</h1>
+          <p id="authDescription">Continue to your personalized job matches.</p>
+          <form id="authForm">
+            <label for="authEmail">Email address</label>
+            <input id="authEmail" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" required>
+            <label for="authPassword">Password</label>
+            <div class="password-field">
+              <input id="authPassword" type="password" autocomplete="current-password" minlength="8" maxlength="128" placeholder="At least 8 characters" required>
+              <button type="button" id="togglePassword" aria-label="Show password">Show</button>
+            </div>
+            <p class="auth-message" id="authMessage" aria-live="polite"></p>
+            <button class="primary-button auth-submit" id="authSubmit" type="submit">Sign in <span aria-hidden="true">→</span></button>
+          </form>
+          <p class="auth-switch"><span id="authSwitchText">New to Pathfinder?</span> <button type="button" id="authSwitch">Create an account</button></p>
+        </div>
+      </section>
     </div>
   </main>
 
-  <div class="wrap" id="appContent" hidden>
-    <header class="top">
-      <div class="brand">
-        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--ink)"/><path d="M8 23 L16 8 L24 23" fill="none" stroke="var(--accent)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16" cy="19" r="2.4" fill="var(--bg)"/></svg>
-        Pathfinder Jobs
+  <div class="app-shell" id="appContent" hidden>
+    <aside class="sidebar" id="sidebar">
+      <button class="brand brand-button sidebar-brand" type="button" data-view="dashboard">
+        <span class="brand-mark" aria-hidden="true"><span>P</span></span>
+        <span>Pathfinder<span class="brand-accent">Jobs</span></span>
+      </button>
+      <nav class="sidebar-nav" aria-label="Main navigation">
+        <button type="button" class="nav-item active" data-view="dashboard"><span aria-hidden="true">⌂</span><span>Dashboard</span></button>
+        <button type="button" class="nav-item" data-view="recommendations"><span aria-hidden="true">⌁</span><span>Recommendations</span><b id="navJobCount">0</b></button>
+        <button type="button" class="nav-item" data-view="profile"><span aria-hidden="true">◎</span><span>My profile</span></button>
+        <button type="button" class="nav-item" data-view="saved"><span aria-hidden="true">♡</span><span>Saved jobs</span><b id="navSavedCount">0</b></button>
+        <button type="button" class="nav-item" data-view="tracker"><span aria-hidden="true">▦</span><span>Application tracker</span><b id="navApplicationCount">0</b></button>
+        <button type="button" class="nav-item" data-view="roadmap"><span aria-hidden="true">↗</span><span>Career roadmap</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="user-card">
+          <span class="avatar" id="accountAvatar">P</span>
+          <div><strong id="accountEmail"></strong><small>Pathfinder member</small></div>
+        </div>
+        <button type="button" class="nav-item sign-out" id="logout"><span aria-hidden="true">↗</span><span>Sign out</span></button>
       </div>
-      <nav><a href="#finder">Find jobs</a><a href="#how">How it works</a><span class="account-email" id="accountEmail"></span><button class="sign-out" id="logout" type="button">Sign out</button></nav>
-    </header>
+    </aside>
 
-    <div class="hero">
-      <h1>Jobs ranked by how well <mark>your skills</mark> fit them.</h1>
-      <p>Add the skills you have. Pathfinder scores every opening, shows which requirements you already meet, and tells you which missing skills would open the most doors.</p>
-    </div>
+    <div class="app-main">
+      <header class="topbar">
+        <button type="button" class="mobile-menu" id="mobileMenu" aria-label="Open navigation" aria-expanded="false">☰</button>
+        <div class="topbar-search" role="search"><span aria-hidden="true">⌕</span><input id="globalSearch" type="search" placeholder="Search jobs or skills" autocomplete="off"></div>
+        <button type="button" class="icon-button" id="topProfileButton" aria-label="Open profile">◎</button>
+      </header>
 
-    <div class="app" id="finder">
-      <aside class="panel" aria-label="Your profile">
-        <h2>Your profile</h2>
-
-        <div class="field">
-          <label class="l" for="skillIn">Skills</label>
-          <input type="text" id="skillIn" list="skillList" placeholder="Type a skill and press Enter" autocomplete="off">
-          <datalist id="skillList"></datalist>
-          <div class="chips" id="mySkills" aria-label="Selected skills"></div>
-          <div class="l" style="margin-top:12px">Quick add</div>
-          <div class="chips" id="sugSkills"></div>
-        </div>
-
-        <div class="field">
-          <label class="l" for="exp">Experience <span class="rangeval" id="expVal"></span></label>
-          <input type="range" id="exp" min="0" max="10" step="1" value="0">
-        </div>
-
-        <div class="field">
-          <label class="l" for="city">Preferred city</label>
-          <select id="city"></select>
-        </div>
-
-        <div class="field">
-          <div class="l">Work style</div>
-          <div class="seg" id="mode" role="group" aria-label="Work style">
-            <button type="button" data-v="Any" aria-pressed="true">Any</button>
-            <button type="button" data-v="Onsite" aria-pressed="false">Onsite</button>
-            <button type="button" data-v="Hybrid" aria-pressed="false">Hybrid</button>
-            <button type="button" data-v="Remote" aria-pressed="false">Remote</button>
+      <div class="view-container">
+        <section class="dashboard-view view" id="dashboardView" data-view-name="dashboard">
+          <div class="page-heading">
+            <div><span class="section-label">Overview</span><h1 id="welcomeHeading">Welcome back</h1><p>Here is how your profile is performing today.</p></div>
+            <button type="button" class="primary-button" data-view="recommendations">Explore matches <span aria-hidden="true">→</span></button>
           </div>
-        </div>
 
-        <div class="field">
-          <label class="l" for="sal">Minimum salary <span class="rangeval" id="salVal"></span></label>
-          <input type="range" id="sal" min="0" max="40" step="1" value="0">
-        </div>
+          <div class="stat-grid">
+            <article class="stat-card"><div class="stat-icon purple">⌁</div><div><span>Profile completion</span><strong id="profileCompletion">0%</strong><div class="progress-track"><div id="profileProgress"></div></div></div></article>
+            <article class="stat-card"><div class="stat-icon blue">◇</div><div><span>Recommended jobs</span><strong id="recommendedCount">0</strong><small id="recommendedSubtext">Based on your profile</small></div></article>
+            <article class="stat-card"><div class="stat-icon cyan">◎</div><div><span>Average match</span><strong id="averageMatch">0%</strong><small>Across current recommendations</small></div></article>
+            <article class="stat-card"><div class="stat-icon rose">♡</div><div><span>Saved jobs</span><strong id="savedCount">0</strong><small>In your saved collection</small></div></article>
+          </div>
 
-        <button class="reset" id="reset" type="button">Reset profile</button>
-      </aside>
+          <div class="dashboard-grid">
+            <section class="panel-card recent-card">
+              <div class="panel-card-head"><div><span class="section-label">Personalised</span><h2>Recent recommendations</h2></div><button type="button" class="link-button" data-view="recommendations">View all</button></div>
+              <div id="recentRecommendations" class="recent-list" aria-live="polite"></div>
+            </section>
+            <aside class="panel-card profile-card">
+              <div class="panel-card-head"><div><span class="section-label">Your profile</span><h2>Profile snapshot</h2></div></div>
+              <div class="snapshot-ring" id="snapshotRing"><div><strong id="snapshotPercent">0%</strong><span>complete</span></div></div>
+              <dl class="snapshot-details">
+                <div><dt>Skills</dt><dd id="snapshotSkills">0</dd></div>
+                <div><dt>Experience</dt><dd id="snapshotExperience">Fresher</dd></div>
+                <div><dt>Location</dt><dd id="snapshotLocation">Anywhere</dd></div>
+                <div><dt>Work style</dt><dd id="snapshotMode">Any</dd></div>
+              </dl>
+              <button type="button" class="secondary-button full" data-view="profile">Improve profile</button>
+            </aside>
+          </div>
+        </section>
 
-      <main>
-        <div class="results-head">
-          <h2>Your matches</h2>
-          <span id="resCount"></span>
-        </div>
-        <div class="gap-box" id="gapBox" hidden></div>
-        <div class="legend" id="legend">
-          <span><i style="background:var(--good)"></i>Skill you have</span>
-          <span><i style="border:1px solid var(--line)"></i>Skill you lack</span>
-          <span><i style="border:1px dashed var(--ink-soft)"></i>Dashed = nice to have</span>
-        </div>
-        <div id="results" aria-live="polite"></div>
-      </main>
+        <section class="recommendations-view view" id="recommendationsView" data-view-name="recommendations" hidden>
+          <div class="page-heading">
+            <div><span class="section-label">AI matching</span><h1>Recommended jobs</h1><p id="recommendationSummary">Personalised openings based on your profile.</p></div>
+          </div>
+          <div class="recommendation-toolbar">
+            <div class="filter-chips" id="recommendationFilters">
+              <button type="button" class="filter-chip active" data-filter-mode="Any">All roles</button>
+              <button type="button" class="filter-chip" data-filter-mode="Remote">Remote</button>
+              <button type="button" class="filter-chip" data-filter-mode="Hybrid">Hybrid</button>
+              <button type="button" class="filter-chip" data-filter-mode="Onsite">Onsite</button>
+            </div>
+            <label class="sort-control" for="sortResults"><span>Sort</span><select id="sortResults"><option value="score">Best match</option><option value="salary">Highest salary</option><option value="title">Job title</option></select></label>
+          </div>
+          <div class="gap-box" id="gapBox" hidden></div>
+          <div id="results" class="job-grid" aria-live="polite"></div>
+          <button type="button" class="load-more" id="loadMore" hidden>Load more jobs</button>
+        </section>
+
+        <section class="profile-view view" id="profileView" data-view-name="profile" hidden>
+          <div class="page-heading"><div><span class="section-label">Personal settings</span><h1>Your profile</h1><p>Keep this information current for stronger recommendations.</p></div><button type="button" class="primary-button" id="saveProfileButton">Save changes</button></div>
+          <div class="profile-layout">
+            <section class="panel-card profile-form-card">
+              <h2>Career profile</h2>
+              <div class="field">
+                <label for="skillIn">Skills</label>
+                <div class="skill-input-row"><input type="text" id="skillIn" list="skillList" placeholder="Search or add a skill" autocomplete="off"><button type="button" id="addSkillButton">Add</button></div>
+                <datalist id="skillList"></datalist>
+                <div class="selected-skills" id="mySkills" aria-label="Selected skills"></div>
+              </div>
+              <div class="suggested-skills"><span>Quick add</span><div id="sugSkills" class="chip-row"></div></div>
+              <div class="profile-fields-grid">
+                <div class="field"><label for="exp">Experience <span id="expVal">Fresher</span></label><input type="range" id="exp" min="0" max="40" step="1" value="0"></div>
+                <div class="field"><label for="sal">Minimum salary <span id="salVal">No minimum</span></label><input type="range" id="sal" min="0" max="200" step="1" value="0"></div>
+                <div class="field"><label for="city">Preferred location</label><select id="city"></select></div>
+                <div class="field"><div class="field-label">Work preference</div><div class="seg" id="mode" role="group" aria-label="Work preference"><button type="button" data-v="Any" aria-pressed="true">Any</button><button type="button" data-v="Onsite" aria-pressed="false">Onsite</button><button type="button" data-v="Hybrid" aria-pressed="false">Hybrid</button><button type="button" data-v="Remote" aria-pressed="false">Remote</button></div></div>
+              </div>
+              <button type="button" class="reset-button" id="reset">Reset profile</button>
+            </section>
+            <aside class="panel-card profile-side-card">
+              <div class="snapshot-ring large" id="profileSnapshotRing"><div><strong id="profileSnapshotPercent">0%</strong><span>complete</span></div></div>
+              <h3>Your progress</h3>
+              <p id="profileProgressText">Add more profile details to improve matching.</p>
+              <div class="profile-checklist">
+                <div id="checkSkills"><span>○</span> Skills</div>
+                <div id="checkExperience"><span>○</span> Experience</div>
+                <div id="checkLocation"><span>○</span> Location</div>
+                <div id="checkMode"><span>○</span> Work preference</div>
+                <div id="checkSalary"><span>○</span> Minimum salary</div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="saved-view view" id="savedView" data-view-name="saved" hidden>
+          <div class="page-heading"><div><span class="section-label">Your collection</span><h1>Saved jobs</h1><p>Jobs you saved for later review.</p></div></div>
+          <div id="savedJobs" class="job-grid"></div>
+        </section>
+
+        <section class="tracker-view view" id="trackerView" data-view-name="tracker" hidden>
+          <div class="page-heading">
+            <div><span class="section-label">Your job search</span><h1>Application tracker</h1><p>Keep every opportunity and next step in one place.</p></div>
+          </div>
+          <div class="tracker-stats">
+            <article class="tracker-stat"><span>Total tracked</span><strong id="trackerTotal">0</strong><small>Active and completed applications</small></article>
+            <article class="tracker-stat"><span>In progress</span><strong id="trackerProgress">0</strong><small>Interested through interview</small></article>
+            <article class="tracker-stat"><span>Offers</span><strong id="trackerOffers">0</strong><small>Offers received</small></article>
+            <article class="tracker-stat"><span>Response rate</span><strong id="trackerResponse">0%</strong><small>Applications with an outcome</small></article>
+          </div>
+          <div class="tracker-toolbar">
+            <label>Status
+              <select id="applicationStatusFilter">
+                <option value="">All statuses</option>
+                <option>Interested</option><option>Applied</option><option>Assessment</option>
+                <option>Interview</option><option>Offered</option><option>Rejected</option>
+              </select>
+            </label>
+            <label>From <input id="applicationStartDate" type="date"></label>
+            <label>To <input id="applicationEndDate" type="date"></label>
+            <button type="button" class="secondary-button" id="clearApplicationFilters">Clear filters</button>
+          </div>
+          <div class="pipeline-board" id="applicationBoard" aria-live="polite"></div>
+          <section class="panel-card timeline-panel">
+            <div class="panel-card-head"><div><span class="section-label">Recent activity</span><h2>Application timeline</h2></div></div>
+            <div id="applicationTimeline" class="application-timeline"></div>
+          </section>
+        </section>
+
+        <section class="roadmap-view view" id="roadmapView" data-view-name="roadmap" hidden>
+          <div class="page-heading">
+            <div><span class="section-label">Skill development</span><h1>Career roadmap</h1><p>Build a learning sequence from the requirements of your target roles.</p></div>
+          </div>
+          <section class="panel-card roadmap-role-panel">
+            <div class="panel-card-head">
+              <div><span class="section-label">Choose your direction</span><h2>Target job roles</h2></div>
+              <span class="roadmap-source-note">Based on roles in Pathfinder's job data</span>
+            </div>
+            <p class="roadmap-helper">Select one or more roles. Required skills guide priority; prerequisites are shown separately.</p>
+            <div class="roadmap-role-grid" id="roadmapRoleOptions" aria-label="Available target job roles"></div>
+            <div class="roadmap-actions">
+              <button type="button" class="primary-button" id="buildRoadmapButton">Build my roadmap <span aria-hidden="true">→</span></button>
+              <p id="roadmapMessage" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+          <div id="roadmapContent" hidden>
+            <div class="roadmap-stats">
+              <article class="roadmap-stat"><span>Average skill fit</span><strong id="roadmapCompatibility">0%</strong><small>Across selected roles</small></article>
+              <article class="roadmap-stat"><span>Skills completed</span><strong id="roadmapSkillsDone">0 / 0</strong><small id="roadmapLearningCount">0 in progress</small></article>
+              <article class="roadmap-stat"><span>Learning effort</span><strong id="roadmapHours">0 hrs</strong><small>Estimated focused study time</small></article>
+            </div>
+            <div class="roadmap-progress-panel panel-card">
+              <div><strong>Roadmap progress</strong><span id="roadmapProgressLabel">0% complete</span></div>
+              <div class="roadmap-progress-track"><div id="roadmapProgressBar"></div></div>
+            </div>
+            <section class="roadmap-role-matches">
+              <div class="panel-card-head"><div><span class="section-label">Current profile</span><h2>Role compatibility</h2></div></div>
+              <div id="roadmapRoleMatches" class="roadmap-match-grid"></div>
+            </section>
+            <div id="roadmapStages" class="roadmap-stages"></div>
+            <p class="roadmap-disclaimer">Learning-hour values are rough self-study estimates, not guarantees. Resource links are free learning materials; no certification or employment outcome is implied.</p>
+          </div>
+        </section>
+
+        <section class="details-view view" id="detailsView" data-view-name="details" hidden>
+          <button type="button" class="back-button" id="detailsBack">← Back to recommendations</button>
+          <div id="jobDetails"></div>
+        </section>
+      </div>
     </div>
-
-    <section class="how" id="how">
-      <h2>How the recommendations are made</h2>
-      <p>Each job is compared with your profile by the Flask backend and given a score from 0 to 100. The list is sorted by that score. Open "Why this score" on any job to see each part.</p>
-      <div class="steps">
-        <div class="step"><h3>1. Skill overlap</h3><p>Required skills count double, nice-to-have skills count once. This is blended with a TF-IDF cosine similarity, so rare skills count for more than common ones.</p></div>
-        <div class="step"><h3>2. Experience fit</h3><p>Full marks inside the job's experience range. The score drops for each year you are under or over it.</p></div>
-        <div class="step"><h3>3. Location and salary</h3><p>Remote jobs and jobs in your city score highest. Salary scores full when the top of the range reaches your minimum.</p></div>
-        <div class="step"><h3>4. Skill gaps</h3><p>Missing required skills are counted across your best matches. The ones that appear most are the quickest way to raise your scores.</p></div>
-      </div>
-      <div class="formula">
-        match = <b>0.60</b> × skills + <b>0.20</b> × experience + <b>0.10</b> × location + <b>0.10</b> × salary<br>
-        skills = <b>0.7</b> × weighted overlap + <b>0.3</b> × TF-IDF cosine
-      </div>
-      <p class="note">The openings are example data with made-up companies, stored in backend/data/jobs.json.</p>
-    </section>
   </div>
 
+  <div class="sidebar-overlay" id="sidebarOverlay" hidden></div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <script src="app.js"></script>
 </body>
 </html>
