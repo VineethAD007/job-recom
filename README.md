@@ -10,6 +10,8 @@ job-recommender/
 │   ├── app.py                 Flask API, also serves the frontend
 │   ├── recommender.py         Scoring engine (content-based filtering, TF-IDF)
 │   ├── test_recommender.py    Unit tests for the engine and the API
+│   ├── migrate_email_verification.py  Explicit email-verification schema migration
+│   ├── test_email_verification_migration.py  Migration safety tests
 │   └── data/jobs.json         Example job openings
 ├── frontend/
 │   ├── index.html
@@ -39,11 +41,17 @@ job-recommender/
    ```
    pip install -r requirements.txt
    ```
-4. Start the server:
+4. Apply the local email-verification schema migration:
+   ```
+   python backend/migrate_email_verification.py
+   ```
+   Back up an existing `backend/data/users.db` first. The migration preserves accounts and password hashes, but existing accounts become unverified and must complete email verification before accessing protected features. For a test run, point `DATABASE_PATH` at a disposable database instead of migrating your existing user database.
+5. Configure `RESEND_API_KEY`, `EMAIL_FROM`, `APP_BASE_URL`, and `OTP_HASH_SECRET` in your local environment to send verification emails.
+6. Start the server:
    ```
    python backend/app.py
    ```
-5. Open http://localhost:8000 in your browser. Create an account, then sign in to use the recommender.
+7. Open http://localhost:8000 in your browser. Create an account, verify its email, then sign in to use the recommender.
 
 Accounts are stored in `backend/data/users.db`; passwords are stored as hashes. To keep sessions valid across server restarts, set a persistent `SECRET_KEY` environment variable before starting the server. If it is not set, a temporary key is generated at startup and existing sessions expire when the server restarts.
 
@@ -80,6 +88,39 @@ The migration utility copies rows through Turso's API, so it does not require WA
 
 For local development, leave `DATABASE_BACKEND` unset (or set it to `sqlite`); the app continues to use `DATABASE_PATH`.
 
+## Email verification
+
+New accounts must verify their email with a single-use six-digit code before login. Codes expire after 10 minutes; incorrect attempts, per-account resend cooldowns, and hourly resend limits are enforced by the backend and stored in the configured database. Existing accounts are kept and migrated as unverified. On their next valid login, a code is sent to the email address already on the account; protected APIs also check verification in the database, so an old session cannot bypass the requirement.
+
+Configure these Render environment variables:
+
+- `RESEND_API_KEY`: a secret API key created in the Resend dashboard.
+- `EMAIL_FROM`: a sender using a domain verified in Resend, for example `Pathfinder Jobs <auth@example.com>`.
+- `APP_BASE_URL`: the public HTTPS URL of this app, without a trailing slash.
+- `OTP_HASH_SECRET`: a long, random secret kept stable across restarts; it is used to HMAC verification codes.
+- `SECRET_KEY`: the existing Flask session secret, also kept stable across restarts.
+- `DATABASE_BACKEND=turso`, `TURSO_DATABASE_URL`, and `TURSO_AUTH_TOKEN` for the deployed Turso database.
+
+Generate `OTP_HASH_SECRET` with `python -c "import secrets; print(secrets.token_urlsafe(48))"` and keep the result only in Render's environment settings. It must remain stable so outstanding codes remain verifiable after a restart.
+
+To configure Resend, create an account, generate an API key in the [API Keys dashboard](https://resend.com/api-keys), and [add a domain](https://resend.com/docs/add-a-domain.md). Publish the exact DNS records Resend shows for domain verification and email authentication; record names and values depend on your DNS provider and domain, so do not copy generic values. Wait for the domain to show as verified before using it in `EMAIL_FROM`. The code sends mail through Resend's [HTTPS Email API](https://resend.com/docs/api-reference/emails/send-email); it does not use SMTP.
+
+### Apply the email-verification database migration
+
+The migration is explicit and repeatable; application startup does not apply it. Back up the production database first. From a trusted local checkout, set the deployed Turso connection variables in your shell and explicitly set `DATABASE_BACKEND=turso` before running the migration. Without that setting the script defaults to SQLite and will migrate the local SQLite database instead. Never put credentials in source control:
+
+# PowerShell, from the repository root:
+```
+$env:DATABASE_BACKEND = "turso"
+$env:TURSO_DATABASE_URL = "<your Turso database URL>"
+$env:TURSO_AUTH_TOKEN = "<your Turso auth token>"
+python backend/migrate_email_verification.py
+```
+
+The migration adds `name` and `email_verified` columns to `users` and creates `email_verifications` for hashed codes, expirations, attempts, and resend counters. Existing user rows, IDs, email addresses, and password hashes are retained; existing rows receive an empty name and `email_verified=0`, so those users must verify before using protected features. The script is safe to rerun. Run it against a backup or staging database first, confirm its output, and only then deploy the new application version. Do not deploy the verification-enabled code before the database migration has completed.
+
+After deployment, test registration with an email address you control, verify the received code, and confirm login succeeds. Email-provider responses are not logged, and a delivery failure leaves the account pending so the user can request another code after the cooldown. The repository does not contain production credentials; delivery cannot be confirmed until Resend and Render are configured.
+
 The frontend can be served by Flask on port 8000 or by VS Code Live Server on port 5500. Live Server requests are allowed only from localhost ports 5500/127.0.0.1:5500.
 
 You can also press F5 in VS Code and choose "Run Job Recommender (Flask)". The Live Server extension on port 5500 is also supported while the Flask server is running.
@@ -95,10 +136,12 @@ python -m unittest -v
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/register` | Create an account and sign in |
+| POST | `/api/register` | Create an unverified account and send a verification code |
 | POST | `/api/login` | Sign in |
 | POST | `/api/logout` | Sign out |
 | GET | `/api/session` | Check the current sign-in session |
+| POST | `/api/verify-email` | Verify a six-digit email code |
+| POST | `/api/resend-verification` | Request another email verification code |
 | GET | `/api/health` | Server status |
 | GET | `/api/skills` | All skills in the job data |
 | GET | `/api/cities` | Cities with onsite or hybrid jobs |

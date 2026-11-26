@@ -23,6 +23,8 @@ let activeSearch = "";
 let activeModeFilter = "Any";
 let activeView = "dashboard";
 let creatingAccount = false;
+let verificationEmail = "";
+let verificationCountdownTimer = null;
 let profileSaveTimer = null;
 let recommendationTimer = null;
 let recommendationRequest = 0;
@@ -125,6 +127,7 @@ function navigate(view, jobId = null) {
 function showLanding() {
   $("appContent").hidden = true;
   $("authPage").hidden = true;
+  $("verificationPage").hidden = true;
   $("landingPage").hidden = false;
   window.location.hash = "landing";
   closeMobileNavigation();
@@ -143,6 +146,7 @@ async function refreshOpeningCount() {
 function showAuth(create = false) {
   $("landingPage").hidden = true;
   $("appContent").hidden = true;
+  $("verificationPage").hidden = true;
   $("authPage").hidden = false;
   setAuthMode(create);
   window.location.hash = create ? "register" : "login";
@@ -151,6 +155,9 @@ function showAuth(create = false) {
 
 function setAuthMode(create) {
   creatingAccount = create;
+  $("authNameLabel").hidden = !create;
+  $("authName").hidden = !create;
+  $("authName").required = create;
   $("authKicker").textContent = create ? "Join Pathfinder" : "Welcome back";
   $("authTitle").textContent = create ? "Create your account" : "Sign in to Pathfinder";
   $("authDescription").textContent = create
@@ -161,6 +168,42 @@ function setAuthMode(create) {
   $("authSwitchText").textContent = create ? "Already have an account?" : "New to Pathfinder?";
   $("authSwitch").textContent = create ? "Sign in" : "Create an account";
   $("authMessage").textContent = "";
+  $("authMessage").classList.remove("success");
+}
+
+function showVerification(email, message = "", retryAfter = 0) {
+  verificationEmail = email;
+  sessionStorage.setItem("pendingVerificationEmail", email);
+  $("landingPage").hidden = true;
+  $("authPage").hidden = true;
+  $("appContent").hidden = true;
+  $("verificationPage").hidden = false;
+  $("verificationAddress").textContent = email;
+  $("verificationMessage").textContent = message;
+  $("verificationCode").value = "";
+  window.location.hash = "verify-email";
+  startVerificationCountdown(retryAfter);
+  window.setTimeout(() => $("verificationCode").focus(), 50);
+}
+
+function startVerificationCountdown(seconds) {
+  window.clearInterval(verificationCountdownTimer);
+  const deadline = Date.now() + Math.max(0, Number(seconds) || 0) * 1000;
+  const update = () => {
+    const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    $("resendVerification").disabled = remaining > 0;
+    $("resendVerification").textContent = remaining > 0
+      ? `Resend OTP in ${remaining}s`
+      : "Resend OTP";
+    $("verificationCountdown").textContent = remaining > 0
+      ? `You can request another code in ${remaining} seconds.`
+      : "You can request a new code now.";
+    if (remaining === 0) window.clearInterval(verificationCountdownTimer);
+  };
+  update();
+  if (deadline > Date.now()) {
+    verificationCountdownTimer = window.setInterval(update, 1000);
+  }
 }
 
 async function toggleSavedJob(jobId) {
@@ -976,6 +1019,16 @@ async function checkSession() {
     if (session.authenticated) {
       profileKey = `pathfinder-profile:${session.email}`;
       await initializeApp(session.email);
+    } else if (session.verification_required) {
+      showVerification(
+        session.email,
+        "Please verify your email before continuing. Request a code if you do not have one.",
+      );
+    } else if (
+      window.location.hash === "#verify-email" &&
+      sessionStorage.getItem("pendingVerificationEmail")
+    ) {
+      showVerification(sessionStorage.getItem("pendingVerificationEmail"));
     } else {
       showLanding();
     }
@@ -1044,18 +1097,33 @@ $("authSwitch").addEventListener("click", () => setAuthMode(!creatingAccount));
 $("authForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("authMessage").textContent = "";
+  $("authMessage").classList.remove("success");
   $("authSubmit").disabled = true;
   try {
+    const body = {
+      email: $("authEmail").value,
+      password: $("authPassword").value,
+    };
+    if (creatingAccount) body.name = $("authName").value;
     const endpoint = creatingAccount ? "/api/register" : "/api/login";
-    const data = await readJson(await apiFetch(endpoint, {
+    const response = await apiFetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: $("authEmail").value,
-        password: $("authPassword").value,
-      }),
-    }));
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      if (data.code === "email_verification_required") {
+        showVerification(data.email, data.error, data.retry_after || 0);
+        return;
+      }
+      throw new Error(data.error || response.statusText);
+    }
     $("authForm").reset();
+    if (creatingAccount) {
+      showVerification(data.email, data.message, data.retry_after);
+      return;
+    }
     profileKey = `pathfinder-profile:${data.email}`;
     await initializeApp(data.email);
   } catch (error) {
@@ -1063,6 +1131,55 @@ $("authForm").addEventListener("submit", async (event) => {
   } finally {
     $("authSubmit").disabled = false;
   }
+});
+
+$("verificationForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("verificationMessage").textContent = "";
+  $("verifyEmailSubmit").disabled = true;
+  try {
+    const data = await readJson(await apiFetch("/api/verify-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: verificationEmail,
+        code: $("verificationCode").value,
+      }),
+    }));
+    sessionStorage.removeItem("pendingVerificationEmail");
+    window.clearInterval(verificationCountdownTimer);
+    showAuth(false);
+    $("authEmail").value = verificationEmail;
+    $("authMessage").textContent = data.message;
+    $("authMessage").classList.add("success");
+    $("authPassword").focus();
+  } catch (error) {
+    $("verificationMessage").textContent = error.message;
+  } finally {
+    $("verifyEmailSubmit").disabled = false;
+  }
+});
+
+$("resendVerification").addEventListener("click", async () => {
+  $("verificationMessage").textContent = "";
+  $("resendVerification").disabled = true;
+  try {
+    const data = await readJson(await apiFetch("/api/resend-verification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: verificationEmail }),
+    }));
+    $("verificationMessage").textContent = data.message;
+    startVerificationCountdown(data.retry_after || 60);
+  } catch (error) {
+    $("verificationMessage").textContent = error.message;
+    startVerificationCountdown(60);
+  }
+});
+
+$("verificationLogin").addEventListener("click", () => {
+  showAuth(false);
+  $("authEmail").value = verificationEmail;
 });
 
 $("togglePassword").addEventListener("click", () => {

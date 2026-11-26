@@ -2,6 +2,9 @@
 
 Run:  python backend/app.py      then open http://localhost:8000
 """
+import hashlib
+import hmac
+import html
 import json
 import math
 import os
@@ -9,6 +12,9 @@ import re
 import secrets
 import sqlite3
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import defaultdict
 from contextlib import closing
 from datetime import date
@@ -30,6 +36,10 @@ app.config.update(
     DATABASE_BACKEND=os.environ.get("DATABASE_BACKEND", "sqlite").strip().lower(),
     TURSO_DATABASE_URL=os.environ.get("TURSO_DATABASE_URL", ""),
     TURSO_AUTH_TOKEN=os.environ.get("TURSO_AUTH_TOKEN", ""),
+    RESEND_API_KEY=os.environ.get("RESEND_API_KEY", ""),
+    EMAIL_FROM=os.environ.get("EMAIL_FROM", ""),
+    APP_BASE_URL=os.environ.get("APP_BASE_URL", ""),
+    OTP_HASH_SECRET=os.environ.get("OTP_HASH_SECRET", ""),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "").lower() in {"1", "true", "yes"},
@@ -39,6 +49,15 @@ app.config.update(
 
 _request_counts = defaultdict(list)
 _csrf_token = "csrf_token"
+VERIFICATION_TTL_SECONDS = 600
+VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
+VERIFICATION_RESEND_WINDOW_SECONDS = 3600
+VERIFICATION_MAX_RESENDS_PER_HOUR = 5
+VERIFICATION_MAX_ATTEMPTS = 5
+
+
+class EmailDeliveryError(Exception):
+    pass
 
 
 def _database_connection():
@@ -158,8 +177,22 @@ def init_db():
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if "user_id" not in session:
+        user_id = session.get("user_id")
+        if user_id is None:
             return jsonify(error="Please sign in to continue."), 401
+        with closing(_database_connection()) as db:
+            user = db.execute(
+                "SELECT email, email_verified FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+        if user is None:
+            session.clear()
+            return jsonify(error="Please sign in to continue."), 401
+        if not user["email_verified"]:
+            return jsonify(
+                error="Verify your email address to access this feature.",
+                code="email_verification_required",
+                email=user["email"],
+            ), 403
         return view(*args, **kwargs)
 
     return wrapped
@@ -176,6 +209,218 @@ def _rate_limited(key, limit=20, window=60):
         return True
     timestamps.append(now)
     return False
+
+
+def _email_delivery_configured():
+    base_url = app.config["APP_BASE_URL"].strip()
+    otp_hash_secret = app.config["OTP_HASH_SECRET"].strip()
+    parsed_url = urllib.parse.urlparse(base_url)
+    allowed_http = parsed_url.scheme == "http" and parsed_url.hostname in {
+        "localhost",
+        "127.0.0.1",
+    }
+    return bool(
+        app.config["RESEND_API_KEY"].strip()
+        and app.config["EMAIL_FROM"].strip()
+        and len(otp_hash_secret) >= 32
+        and parsed_url.netloc
+        and (parsed_url.scheme == "https" or allowed_http)
+    )
+
+
+def _verification_code_hash(user_id, code):
+    secret_key = app.config["OTP_HASH_SECRET"]
+    if not isinstance(secret_key, str) or len(secret_key) < 32:
+        raise RuntimeError("OTP_HASH_SECRET must contain at least 32 characters.")
+    message = f"{user_id}:{code}".encode("utf-8")
+    return hmac.new(secret_key.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def _send_verification_email(email, name, code):
+    if not _email_delivery_configured():
+        raise EmailDeliveryError
+
+    base_url = app.config["APP_BASE_URL"].strip().rstrip("/")
+    safe_name = html.escape(name or "there")
+    safe_url = html.escape(base_url, quote=True)
+    html_body = f"""
+        <div style="background:#080b18;color:#f5f7ff;padding:36px 20px;font-family:Arial,sans-serif">
+          <div style="max-width:520px;margin:auto;background:#11172d;border:1px solid #293252;border-radius:16px;padding:32px">
+            <div style="font-size:20px;font-weight:bold;margin-bottom:24px">Pathfinder<span style="color:#9b87ff">Jobs</span></div>
+            <h1 style="font-size:24px;margin:0 0 12px">Verify your email</h1>
+            <p style="color:#b6bfd9">Hi {safe_name}, enter this one-time code to finish creating your account.</p>
+            <div style="margin:26px 0;padding:16px;text-align:center;border-radius:10px;background:#1a2342;font-size:32px;letter-spacing:10px;font-weight:bold">{code}</div>
+            <p style="color:#b6bfd9">This code expires in 10 minutes and can only be used once.</p>
+            <p><a href="{safe_url}" style="color:#a78bfa">Open Pathfinder Jobs</a></p>
+          </div>
+        </div>
+    """
+    text_body = (
+        f"Hi {name or 'there'}, your Pathfinder Jobs verification code is {code}. "
+        f"It expires in 10 minutes and can only be used once. Open {base_url}."
+    )
+    payload = json.dumps(
+        {
+            "from": app.config["EMAIL_FROM"].strip(),
+            "to": [email],
+            "subject": "Verify your Pathfinder Jobs email",
+            "html": html_body,
+            "text": text_body,
+        }
+    ).encode("utf-8")
+    api_request = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {app.config['RESEND_API_KEY'].strip()}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(api_request, timeout=10) as response:
+            if not 200 <= response.status < 300:
+                raise EmailDeliveryError
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise EmailDeliveryError from exc
+
+
+def _issue_verification_code(user_id, email, name, force_new=False):
+    now = int(time.time())
+    with closing(_database_connection()) as db:
+        user = db.execute(
+            "SELECT email_verified FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if user is None or user["email_verified"]:
+            return {"status": "not_required", "retry_after": 0}
+        record = db.execute(
+            "SELECT * FROM email_verifications WHERE user_id = ?", (user_id,)
+        ).fetchone()
+
+    if (
+        record
+        and not force_new
+        and record["otp_hash"]
+        and record["expires_at"]
+        and record["expires_at"] > now
+    ):
+        return {
+            "status": "pending",
+            "retry_after": max(
+                0,
+                (record["last_sent_at"] or 0)
+                + VERIFICATION_RESEND_COOLDOWN_SECONDS
+                - now,
+            ),
+        }
+
+    if record and record["last_sent_at"]:
+        cooldown = (
+            record["last_sent_at"] + VERIFICATION_RESEND_COOLDOWN_SECONDS - now
+        )
+        if cooldown > 0:
+            return {"status": "cooldown", "retry_after": cooldown}
+
+    window_start = record["resend_window_started_at"] if record else 0
+    resend_count = record["resend_count"] if record else 0
+    if now - window_start >= VERIFICATION_RESEND_WINDOW_SECONDS:
+        window_start = now
+        resend_count = 0
+    if resend_count >= VERIFICATION_MAX_RESENDS_PER_HOUR:
+        return {
+            "status": "rate_limited",
+            "retry_after": max(1, window_start + VERIFICATION_RESEND_WINDOW_SECONDS - now),
+        }
+    if not _email_delivery_configured():
+        return {
+            "status": "delivery_failed",
+            "retry_after": VERIFICATION_RESEND_COOLDOWN_SECONDS,
+        }
+
+    previous_hash = record["otp_hash"] if record else None
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    code_hash = _verification_code_hash(user_id, code)
+    while code_hash == previous_hash:
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        code_hash = _verification_code_hash(user_id, code)
+    expires_at = now + VERIFICATION_TTL_SECONDS
+    with closing(_database_connection()) as db, db:
+        cursor = db.execute(
+            """
+            INSERT INTO email_verifications (
+                user_id, otp_hash, expires_at, attempts, last_sent_at,
+                resend_window_started_at, resend_count
+            ) VALUES (?, ?, ?, 0, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                otp_hash = excluded.otp_hash,
+                expires_at = excluded.expires_at,
+                attempts = 0,
+                last_sent_at = excluded.last_sent_at,
+                resend_window_started_at = excluded.resend_window_started_at,
+                resend_count = excluded.resend_count
+            WHERE (
+                email_verifications.last_sent_at IS NULL
+                OR email_verifications.last_sent_at <= ?
+            ) AND (
+                email_verifications.resend_window_started_at <= ?
+                OR email_verifications.resend_count < ?
+            )
+            """,
+            (
+                user_id,
+                code_hash,
+                expires_at,
+                now,
+                window_start,
+                resend_count + 1,
+                now - VERIFICATION_RESEND_COOLDOWN_SECONDS,
+                now - VERIFICATION_RESEND_WINDOW_SECONDS,
+                VERIFICATION_MAX_RESENDS_PER_HOUR,
+            ),
+        )
+        if cursor.rowcount == 0:
+            current = db.execute(
+                "SELECT last_sent_at, resend_window_started_at FROM email_verifications WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            cooldown = (
+                (current["last_sent_at"] or 0)
+                + VERIFICATION_RESEND_COOLDOWN_SECONDS
+                - now
+            )
+            if cooldown > 0:
+                return {"status": "cooldown", "retry_after": cooldown}
+            return {
+                "status": "rate_limited",
+                "retry_after": max(
+                    1,
+                    current["resend_window_started_at"]
+                    + VERIFICATION_RESEND_WINDOW_SECONDS
+                    - now,
+                ),
+            }
+
+    try:
+        _send_verification_email(email, name, code)
+    except EmailDeliveryError:
+        with closing(_database_connection()) as db, db:
+            db.execute(
+                """
+                UPDATE email_verifications
+                SET otp_hash = NULL, expires_at = NULL
+                WHERE user_id = ? AND otp_hash = ?
+                """,
+                (user_id, code_hash),
+            )
+        return {
+            "status": "delivery_failed",
+            "retry_after": VERIFICATION_RESEND_COOLDOWN_SECONDS,
+        }
+
+    return {
+        "status": "sent",
+        "retry_after": VERIFICATION_RESEND_COOLDOWN_SECONDS,
+    }
 
 
 @app.before_request
@@ -248,8 +493,11 @@ def register():
     if not isinstance(body, dict):
         return jsonify(error="Send a JSON body."), 400
 
+    name = body.get("name")
     email = body.get("email")
     password = body.get("password")
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > 80:
+        return jsonify(error="Enter your name (up to 80 characters)."), 400
     if (
         not isinstance(email, str)
         or len(email.strip()) > 254
@@ -258,23 +506,38 @@ def register():
         return jsonify(error="Enter a valid email address."), 400
     if not isinstance(password, str) or len(password) < 8 or len(password) > 128:
         return jsonify(error="Password must be between 8 and 128 characters."), 400
+    if not _email_delivery_configured():
+        return jsonify(
+            error="Email verification is temporarily unavailable. Please try again later."
+        ), 503
 
+    name = name.strip()
     email = email.strip().lower()
     try:
         with closing(_database_connection()) as db, db:
             cursor = db.execute(
-                "INSERT INTO users (email, password_hash) VALUES (?, ?)",
-                (email, generate_password_hash(password)),
+                """
+                INSERT INTO users (name, email, password_hash, email_verified)
+                VALUES (?, ?, ?, 0)
+                """,
+                (name, email, generate_password_hash(password)),
             )
             user_id = cursor.lastrowid
     except _database_integrity_errors():
         return jsonify(error="An account with that email already exists."), 409
 
-    session.clear()
-    session.permanent = True
-    session["user_id"] = user_id
-    session["email"] = email
-    return jsonify(email=email), 201
+    delivery = _issue_verification_code(user_id, email, name, force_new=True)
+    return jsonify(
+        email=email,
+        verification_required=True,
+        email_sent=delivery["status"] == "sent",
+        message=(
+            "We sent a verification code to your email."
+            if delivery["status"] == "sent"
+            else "Your account was created, but the verification email could not be sent. You can resend the code."
+        ),
+        retry_after=delivery["retry_after"],
+    ), 201
 
 
 @app.post("/api/login")
@@ -296,11 +559,25 @@ def login():
 
     with closing(_database_connection()) as db:
         user = db.execute(
-            "SELECT id, email, password_hash FROM users WHERE email = ?",
+            "SELECT id, email, password_hash, name, email_verified FROM users WHERE email = ?",
             (email.strip().lower(),),
         ).fetchone()
     if user is None or not check_password_hash(user[2], password):
         return jsonify(error="Email or password is incorrect."), 401
+    if not user["email_verified"]:
+        delivery = _issue_verification_code(user["id"], user["email"], user["name"])
+        message = (
+            "Email verification is required. Check your inbox for a verification code."
+            if delivery["status"] in {"sent", "pending"}
+            else "Email verification is required. Request a new code to continue."
+        )
+        return jsonify(
+            error=message,
+            code="email_verification_required",
+            email=user["email"],
+            email_sent=delivery["status"] == "sent",
+            retry_after=delivery["retry_after"],
+        ), 403
 
     session.clear()
     session.permanent = True
@@ -313,7 +590,130 @@ def login():
 def session_status():
     if "user_id" not in session:
         return jsonify(authenticated=False)
-    return jsonify(authenticated=True, email=session["email"])
+    with closing(_database_connection()) as db:
+        user = db.execute(
+            "SELECT email, email_verified FROM users WHERE id = ?",
+            (session["user_id"],),
+        ).fetchone()
+    if user is None:
+        session.clear()
+        return jsonify(authenticated=False)
+    if not user["email_verified"]:
+        return jsonify(
+            authenticated=False,
+            verification_required=True,
+            email=user["email"],
+        )
+    return jsonify(authenticated=True, email=user["email"])
+
+
+@app.post("/api/verify-email")
+def verify_email():
+    if _rate_limited("verify:" + request.remote_addr, limit=30, window=300):
+        return jsonify(error="Too many verification attempts. Please try again later."), 429
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(error="Send a JSON body."), 400
+    email = body.get("email")
+    code = body.get("code")
+    if (
+        not isinstance(email, str)
+        or len(email.strip()) > 254
+        or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email.strip())
+    ):
+        return jsonify(error="Enter a valid email address."), 400
+    if not isinstance(code, str) or not re.fullmatch(r"\d{6}", code):
+        return jsonify(error="Enter the six-digit verification code."), 400
+
+    email = email.strip().lower()
+    now = int(time.time())
+    with closing(_database_connection()) as db:
+        record = db.execute(
+            """
+            SELECT u.id, u.email_verified, v.otp_hash, v.expires_at, v.attempts
+            FROM users AS u
+            LEFT JOIN email_verifications AS v ON v.user_id = u.id
+            WHERE u.email = ?
+            """,
+            (email,),
+        ).fetchone()
+    if record is None or record["email_verified"]:
+        return jsonify(error="That verification code is invalid or expired."), 400
+    if not record["otp_hash"] or not record["expires_at"] or record["expires_at"] <= now:
+        return jsonify(error="That verification code is invalid or expired. Request a new one."), 400
+    if record["attempts"] >= VERIFICATION_MAX_ATTEMPTS:
+        return jsonify(error="Too many incorrect codes. Request a new verification code."), 429
+
+    supplied_hash = _verification_code_hash(record["id"], code)
+    if not hmac.compare_digest(supplied_hash, record["otp_hash"]):
+        with closing(_database_connection()) as db, db:
+            cursor = db.execute(
+                """
+                UPDATE email_verifications
+                SET attempts = attempts + 1
+                WHERE user_id = ? AND otp_hash = ? AND expires_at > ? AND attempts < ?
+                """,
+                (
+                    record["id"],
+                    record["otp_hash"],
+                    now,
+                    VERIFICATION_MAX_ATTEMPTS,
+                ),
+            )
+        if cursor.rowcount == 0:
+            return jsonify(error="Too many incorrect codes. Request a new verification code."), 429
+        return jsonify(error="That verification code is incorrect."), 400
+
+    with closing(_database_connection()) as db, db:
+        deleted = db.execute(
+            """
+            DELETE FROM email_verifications
+            WHERE user_id = ? AND otp_hash = ? AND expires_at > ? AND attempts < ?
+            """,
+            (
+                record["id"],
+                record["otp_hash"],
+                now,
+                VERIFICATION_MAX_ATTEMPTS,
+            ),
+        ).rowcount
+        if deleted != 1:
+            return jsonify(error="That verification code is invalid or expired."), 400
+        db.execute(
+            "UPDATE users SET email_verified = 1 WHERE id = ?",
+            (record["id"],),
+        )
+
+    session.clear()
+    return jsonify(verified=True, message="Your email is verified. Please sign in.")
+
+
+@app.post("/api/resend-verification")
+def resend_verification():
+    if _rate_limited("resend-verification:" + request.remote_addr, limit=20, window=300):
+        return jsonify(error="Too many requests. Please try again later."), 429
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(error="Send a JSON body."), 400
+    email = body.get("email")
+    if (
+        not isinstance(email, str)
+        or len(email.strip()) > 254
+        or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email.strip())
+    ):
+        return jsonify(error="Enter a valid email address."), 400
+
+    email = email.strip().lower()
+    with closing(_database_connection()) as db:
+        user = db.execute(
+            "SELECT id, name, email_verified FROM users WHERE email = ?", (email,)
+        ).fetchone()
+    if user is not None and not user["email_verified"]:
+        _issue_verification_code(user["id"], email, user["name"], force_new=True)
+    return jsonify(
+        message="If this account needs verification, a code will be sent when allowed.",
+        retry_after=VERIFICATION_RESEND_COOLDOWN_SECONDS,
+    ), 202
 
 
 @app.post("/api/logout")

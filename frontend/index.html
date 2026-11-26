@@ -104,6 +104,8 @@
           <h1 id="authTitle">Sign in to Pathfinder</h1>
           <p id="authDescription">Continue to your personalized job matches.</p>
           <form id="authForm">
+            <label id="authNameLabel" for="authName" hidden>Your name</label>
+            <input id="authName" type="text" autocomplete="name" maxlength="80" placeholder="Your name" hidden>
             <label for="authEmail">Email address</label>
             <input id="authEmail" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" required>
             <label for="authPassword">Password</label>
@@ -115,6 +117,40 @@
             <button class="primary-button auth-submit" id="authSubmit" type="submit">Sign in <span aria-hidden="true">→</span></button>
           </form>
           <p class="auth-switch"><span id="authSwitchText">New to Pathfinder?</span> <button type="button" id="authSwitch">Create an account</button></p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <main class="auth-page" id="verificationPage" hidden>
+    <div class="auth-shell verification-shell">
+      <section class="auth-brand-panel">
+        <button class="brand brand-button" type="button" data-route="landing">
+          <span class="brand-mark" aria-hidden="true"><span>P</span></span>
+          <span>Pathfinder<span class="brand-accent">Jobs</span></span>
+        </button>
+        <div class="auth-brand-copy">
+          <span class="eyebrow"><span class="eyebrow-dot"></span> One last step</span>
+          <h2>Confirm your email to start finding your next opportunity.</h2>
+        </div>
+      </section>
+      <section class="auth-form-panel">
+        <button class="auth-close" type="button" data-route="landing" aria-label="Close verification">×</button>
+        <div class="auth-card">
+          <span class="auth-kicker">Account security</span>
+          <h1>Verify Your Email</h1>
+          <p>Enter the six-digit code sent to:</p>
+          <p class="verification-address" id="verificationAddress"></p>
+          <form id="verificationForm">
+            <label for="verificationCode">Six-digit code</label>
+            <input id="verificationCode" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required>
+            <p class="auth-message" id="verificationMessage" aria-live="polite"></p>
+            <button class="primary-button auth-submit" id="verifyEmailSubmit" type="submit">Verify Email</button>
+          </form>
+          <button class="secondary-button full resend-button" id="resendVerification" type="button">Resend OTP</button>
+          <p class="verification-countdown" id="verificationCountdown" aria-live="polite"></p>
+          <p class="verification-expiry">Codes expire after 10 minutes.</p>
+          <p class="auth-switch">Already verified? <button type="button" id="verificationLogin">Sign in</button></p>
         </div>
       </section>
     </div>

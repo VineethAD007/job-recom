@@ -1,10 +1,22 @@
-import unittest
-import tempfile
+import json
 import sqlite3
+import tempfile
+import time
+import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
-from app import _database_connection, app, init_db
+from app import (
+    EmailDeliveryError,
+    VERIFICATION_MAX_ATTEMPTS,
+    _database_connection,
+    _send_verification_email,
+    _request_counts,
+    app,
+    init_db,
+)
+from migrate_email_verification import migrate as migrate_email_verification
 from sklearn.metrics.pairwise import cosine_similarity
 from werkzeug.security import check_password_hash
 
@@ -191,21 +203,57 @@ class RecommenderTests(unittest.TestCase):
 
 class ApiTests(unittest.TestCase):
     def setUp(self):
+        _request_counts.clear()
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.previous_database = app.config["DATABASE"]
-        app.config["DATABASE"] = str(Path(self.temp_dir.name) / "users.db")
+        self.previous_config = {
+            key: app.config[key]
+            for key in (
+                "DATABASE",
+                "DATABASE_BACKEND",
+                "SECRET_KEY",
+                "RESEND_API_KEY",
+                "EMAIL_FROM",
+                "APP_BASE_URL",
+                "OTP_HASH_SECRET",
+            )
+        }
+        app.config.update(
+            DATABASE=str(Path(self.temp_dir.name) / "users.db"),
+            DATABASE_BACKEND="sqlite",
+            SECRET_KEY="test-verification-secret",
+            RESEND_API_KEY="re_test_key",
+            EMAIL_FROM="Pathfinder Jobs <verify@example.test>",
+            APP_BASE_URL="http://localhost:8000",
+            OTP_HASH_SECRET="test-otp-hash-secret-with-at-least-32-characters",
+        )
         init_db()
+        migrate_email_verification()
         self.client = app.test_client()
+        self.email_sender_patch = patch("app._send_verification_email")
+        self.email_sender = self.email_sender_patch.start()
 
     def tearDown(self):
-        app.config["DATABASE"] = self.previous_database
+        self.email_sender_patch.stop()
+        app.config.update(self.previous_config)
         self.temp_dir.cleanup()
 
-    def sign_in(self):
-        return self.client.post(
+    def register_and_verify(self, client, email, password="password123", name="Test User"):
+        registered = client.post(
             "/api/register",
-            json={"email": "student@example.com", "password": "password123"},
+            json={"name": name, "email": email, "password": password},
         )
+        if registered.status_code == 201:
+            code = self.email_sender.call_args.args[2]
+            verified = client.post("/api/verify-email", json={"email": email, "code": code})
+            if verified.status_code == 200:
+                client.post(
+                    "/api/login",
+                    json={"email": email, "password": password},
+                )
+        return registered
+
+    def sign_in(self):
+        return self.register_and_verify(self.client, "student@example.com")
 
     def test_health(self):
         self.assertEqual(self.client.get("/api/health").get_json()["status"], "ok")
@@ -301,10 +349,30 @@ class ApiTests(unittest.TestCase):
     def test_register_login_and_logout(self):
         registered = self.client.post(
             "/api/register",
-            json={"email": "Student@Example.com", "password": "password123"},
+            json={
+                "name": "Student Example",
+                "email": "Student@Example.com",
+                "password": "password123",
+            },
         )
         self.assertEqual(registered.status_code, 201)
         self.assertEqual(registered.get_json()["email"], "student@example.com")
+        self.assertTrue(registered.get_json()["verification_required"])
+        self.assertFalse(self.client.get("/api/session").get_json()["authenticated"])
+        verification_code = self.email_sender.call_args.args[2]
+        verified = self.client.post(
+            "/api/verify-email",
+            json={"email": "student@example.com", "code": verification_code},
+        )
+        self.assertEqual(verified.status_code, 200)
+        self.assertFalse(self.client.get("/api/session").get_json()["authenticated"])
+        self.assertEqual(
+            self.client.post(
+                "/api/login",
+                json={"email": "STUDENT@example.com", "password": "password123"},
+            ).status_code,
+            200,
+        )
         self.assertTrue(self.client.get("/api/session").get_json()["authenticated"])
         self.assertEqual(self.client.get("/api/skills").status_code, 200)
         self.assertEqual(self.client.post("/api/logout").status_code, 200)
@@ -317,9 +385,297 @@ class ApiTests(unittest.TestCase):
             200,
         )
 
+    def test_registration_requires_verification_before_login_and_protected_access(self):
+        response = self.client.post(
+            "/api/register",
+            json={
+                "name": "New User",
+                "email": "new-user@example.com",
+                "password": "password123",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.get_json()["verification_required"])
+        self.assertTrue(response.get_json()["email_sent"])
+        with closing(_database_connection()) as db:
+            user = db.execute(
+                "SELECT id, name, email_verified FROM users WHERE email = ?",
+                ("new-user@example.com",),
+            ).fetchone()
+            verification = db.execute(
+                "SELECT otp_hash, expires_at, attempts FROM email_verifications WHERE user_id = ?",
+                (user["id"],),
+            ).fetchone()
+        code = self.email_sender.call_args.args[2]
+        self.assertEqual(user["name"], "New User")
+        self.assertEqual(user["email_verified"], 0)
+        self.assertEqual(len(code), 6)
+        self.assertNotEqual(verification["otp_hash"], code)
+        self.assertNotIn(code, response.get_data(as_text=True))
+        self.assertNotIn(verification["otp_hash"], response.get_data(as_text=True))
+        self.assertGreater(verification["expires_at"], int(time.time()))
+        self.assertEqual(verification["attempts"], 0)
+
+        login = self.client.post(
+            "/api/login",
+            json={"email": "new-user@example.com", "password": "password123"},
+        )
+        self.assertEqual(login.status_code, 403)
+        self.assertEqual(login.get_json()["code"], "email_verification_required")
+        with self.client.session_transaction() as current_session:
+            current_session["user_id"] = user["id"]
+            current_session["email"] = "new-user@example.com"
+        protected = self.client.get("/api/jobs")
+        self.assertEqual(protected.status_code, 403)
+        self.assertEqual(protected.get_json()["code"], "email_verification_required")
+
+    def test_verification_is_single_use_and_does_not_create_a_session(self):
+        self.client.post(
+            "/api/register",
+            json={
+                "name": "Verify Me",
+                "email": "verify@example.com",
+                "password": "password123",
+            },
+        )
+        code = self.email_sender.call_args.args[2]
+        malformed = self.client.post(
+            "/api/verify-email",
+            json={"email": "verify@example.com", "code": "12x456"},
+        )
+        self.assertEqual(malformed.status_code, 400)
+        verification = self.client.post(
+            "/api/verify-email",
+            json={"email": "verify@example.com", "code": code},
+        )
+        self.assertEqual(verification.status_code, 200)
+        self.assertFalse(self.client.get("/api/session").get_json()["authenticated"])
+        self.assertEqual(
+            self.client.post(
+                "/api/verify-email",
+                json={"email": "verify@example.com", "code": code},
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/login",
+                json={"email": "verify@example.com", "password": "password123"},
+            ).status_code,
+            200,
+        )
+
+    def test_wrong_and_expired_verification_codes_are_rejected(self):
+        self.client.post(
+            "/api/register",
+            json={
+                "name": "Wrong Code",
+                "email": "wrong-code@example.com",
+                "password": "password123",
+            },
+        )
+        code = self.email_sender.call_args.args[2]
+        for _ in range(VERIFICATION_MAX_ATTEMPTS):
+            response = self.client.post(
+                "/api/verify-email",
+                json={"email": "wrong-code@example.com", "code": "000000" if code != "000000" else "000001"},
+            )
+            self.assertEqual(response.status_code, 400)
+        limited = self.client.post(
+            "/api/verify-email",
+            json={"email": "wrong-code@example.com", "code": code},
+        )
+        self.assertEqual(limited.status_code, 429)
+
+        self.client.post(
+            "/api/register",
+            json={
+                "name": "Expired Code",
+                "email": "expired@example.com",
+                "password": "password123",
+            },
+        )
+        expired_code = self.email_sender.call_args.args[2]
+        with closing(_database_connection()) as db, db:
+            db.execute(
+                """
+                UPDATE email_verifications SET expires_at = ?
+                WHERE user_id = (SELECT id FROM users WHERE email = ?)
+                """,
+                (int(time.time()) - 1, "expired@example.com"),
+            )
+        expired = self.client.post(
+            "/api/verify-email",
+            json={"email": "expired@example.com", "code": expired_code},
+        )
+        self.assertEqual(expired.status_code, 400)
+
+    def test_resend_cooldown_rate_limit_and_old_code_invalidation(self):
+        self.client.post(
+            "/api/register",
+            json={
+                "name": "Resend Code",
+                "email": "resend@example.com",
+                "password": "password123",
+            },
+        )
+        first_code = self.email_sender.call_args.args[2]
+        cooldown = self.client.post(
+            "/api/resend-verification",
+            json={"email": "resend@example.com"},
+        )
+        self.assertEqual(cooldown.status_code, 202)
+        self.assertEqual(self.email_sender.call_count, 1)
+
+        with closing(_database_connection()) as db, db:
+            db.execute(
+                """
+                UPDATE email_verifications SET last_sent_at = ?
+                WHERE user_id = (SELECT id FROM users WHERE email = ?)
+                """,
+                (int(time.time()) - 61, "resend@example.com"),
+            )
+        resent = self.client.post(
+            "/api/resend-verification",
+            json={"email": "resend@example.com"},
+        )
+        self.assertEqual(resent.status_code, 202)
+        self.assertEqual(self.email_sender.call_count, 2)
+        second_code = self.email_sender.call_args.args[2]
+        self.assertNotEqual(first_code, second_code)
+        self.assertEqual(
+            self.client.post(
+                "/api/verify-email",
+                json={"email": "resend@example.com", "code": first_code},
+            ).status_code,
+            400,
+        )
+
+        with closing(_database_connection()) as db, db:
+            db.execute(
+                """
+                UPDATE email_verifications
+                SET last_sent_at = ?, resend_count = ?, resend_window_started_at = ?
+                WHERE user_id = (SELECT id FROM users WHERE email = ?)
+                """,
+                (int(time.time()) - 61, 5, int(time.time()), "resend@example.com"),
+            )
+        self.client.post(
+            "/api/resend-verification",
+            json={"email": "resend@example.com"},
+        )
+        self.assertEqual(self.email_sender.call_count, 2)
+
+    def test_email_delivery_failure_keeps_account_pending_and_allows_resend(self):
+        self.email_sender.side_effect = EmailDeliveryError
+        response = self.client.post(
+            "/api/register",
+            json={
+                "name": "Delivery Failure",
+                "email": "delivery-failure@example.com",
+                "password": "password123",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(response.get_json()["email_sent"])
+        with closing(_database_connection()) as db:
+            record = db.execute(
+                """
+                SELECT v.otp_hash FROM email_verifications AS v
+                JOIN users AS u ON u.id = v.user_id WHERE u.email = ?
+                """,
+                ("delivery-failure@example.com",),
+            ).fetchone()
+        self.assertIsNone(record["otp_hash"])
+
+        self.email_sender.side_effect = None
+        with closing(_database_connection()) as db, db:
+            db.execute(
+                """
+                UPDATE email_verifications SET last_sent_at = ?
+                WHERE user_id = (SELECT id FROM users WHERE email = ?)
+                """,
+                (int(time.time()) - 61, "delivery-failure@example.com"),
+            )
+        resend = self.client.post(
+            "/api/resend-verification",
+            json={"email": "delivery-failure@example.com"},
+        )
+        self.assertEqual(resend.status_code, 202)
+        self.assertEqual(self.email_sender.call_count, 2)
+
+    def test_existing_unverified_account_can_verify_on_login(self):
+        from werkzeug.security import generate_password_hash
+
+        with closing(_database_connection()) as db, db:
+            db.execute(
+                """
+                INSERT INTO users (name, email, password_hash, email_verified)
+                VALUES ('', ?, ?, 0)
+                """,
+                ("legacy@example.com", generate_password_hash("password123")),
+            )
+        login = self.client.post(
+            "/api/login",
+            json={"email": "legacy@example.com", "password": "password123"},
+        )
+        self.assertEqual(login.status_code, 403)
+        self.assertTrue(login.get_json()["email_sent"])
+        code = self.email_sender.call_args.args[2]
+        self.assertEqual(
+            self.client.post(
+                "/api/verify-email",
+                json={"email": "legacy@example.com", "code": code},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/login",
+                json={"email": "legacy@example.com", "password": "password123"},
+            ).status_code,
+            200,
+        )
+
+    def test_pending_code_survives_new_client_and_repeat_migration(self):
+        self.client.post(
+            "/api/register",
+            json={
+                "name": "Persistent OTP",
+                "email": "persistent@example.com",
+                "password": "password123",
+            },
+        )
+        code = self.email_sender.call_args.args[2]
+        migrate_email_verification()
+        restarted_client = app.test_client()
+        response = restarted_client.post(
+            "/api/verify-email",
+            json={"email": "persistent@example.com", "code": code},
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_resend_email_uses_resend_https_api_and_branded_payload(self):
+        from unittest.mock import MagicMock
+
+        response = MagicMock()
+        response.__enter__.return_value.status = 200
+        with patch("app.urllib.request.urlopen", return_value=response) as urlopen:
+            _send_verification_email("person@example.test", "A <User>", "012345")
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.resend.com/emails")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.get_header("Authorization"), "Bearer re_test_key")
+        payload = json.loads(request.data)
+        self.assertEqual(payload["to"], ["person@example.test"])
+        self.assertIn("Pathfinder", payload["html"])
+        self.assertIn("A &lt;User&gt;", payload["html"])
+        self.assertIn("012345", payload["text"])
+
     def test_csrf_tokens_guard_registration_login_logout_and_other_mutations(self):
         origin = "http://localhost:8000"
-        payload = {"email": "csrf@example.com", "password": "password123"}
+        payload = {"name": "CSRF User", "email": "csrf@example.com", "password": "password123"}
         self.assertEqual(
             self.client.post(
                 "/api/register",
@@ -344,6 +700,15 @@ class ApiTests(unittest.TestCase):
             201,
         )
 
+        verification_code = self.email_sender.call_args.args[2]
+        self.assertEqual(
+            self.client.post(
+                "/api/verify-email",
+                json={"email": payload["email"], "code": verification_code},
+                headers=valid_headers,
+            ).status_code,
+            200,
+        )
         authenticated_token = self.client.get("/api/csrf").get_json()["token"]
         self.assertNotEqual(authenticated_token, csrf)
         self.assertEqual(
@@ -371,8 +736,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(recommendation.status_code, 200)
 
     def test_authenticated_sessions_are_permanent_and_cookie_is_http_only(self):
+        self.register_and_verify(self.client, "session@example.com")
         response = self.client.post(
-            "/api/register",
+            "/api/login",
             json={"email": "session@example.com", "password": "password123"},
         )
         self.assertIn("HttpOnly", response.headers.get("Set-Cookie", ""))
@@ -396,18 +762,19 @@ class ApiTests(unittest.TestCase):
     def test_registration_validation_and_duplicate_email(self):
         invalid = self.client.post(
             "/api/register",
-            json={"email": "not-an-email", "password": "short"},
+            json={"name": "Invalid", "email": "not-an-email", "password": "short"},
         )
         self.assertEqual(invalid.status_code, 400)
-        payload = {"email": "student@example.com", "password": "password123"}
+        payload = {
+            "name": "Student Example",
+            "email": "student@example.com",
+            "password": "password123",
+        }
         self.assertEqual(self.client.post("/api/register", json=payload).status_code, 201)
         self.assertEqual(self.client.post("/api/register", json=payload).status_code, 409)
 
     def test_login_rejects_wrong_password(self):
-        self.client.post(
-            "/api/register",
-            json={"email": "student@example.com", "password": "password123"},
-        )
+        self.register_and_verify(self.client, "student@example.com")
         self.client.post("/api/logout")
         response = self.client.post(
             "/api/login",
@@ -577,10 +944,7 @@ class ApiTests(unittest.TestCase):
 
         other_user = app.test_client()
         self.assertEqual(
-            other_user.post(
-                "/api/register",
-                json={"email": "other@example.com", "password": "password123"},
-            ).status_code,
+            self.register_and_verify(other_user, "other@example.com").status_code,
             201,
         )
         self.assertEqual(other_user.get("/api/applications").get_json()["applications"], [])
@@ -718,10 +1082,7 @@ class ApiTests(unittest.TestCase):
         )
         other_user = app.test_client()
         self.assertEqual(
-            other_user.post(
-                "/api/register",
-                json={"email": "roadmap-other@example.com", "password": "password123"},
-            ).status_code,
+            self.register_and_verify(other_user, "roadmap-other@example.com").status_code,
             201,
         )
         other_roadmap = other_user.get("/api/roadmap").get_json()
