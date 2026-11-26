@@ -49,6 +49,37 @@ Accounts are stored in `backend/data/users.db`; passwords are stored as hashes. 
 
 For deployment, set `SECRET_KEY` to a long random value and set `COOKIE_SECURE=true` when using HTTPS. Optionally set `SESSION_LIFETIME_SECONDS` and `DATABASE_PATH`.
 
+## Use Turso with Render
+
+The app uses local SQLite by default. For remote storage, create a **Turso** database (the `turso_serverless` driver does not connect to legacy libSQL databases) and configure `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as Render environment secrets.
+
+### New Render Free deployment
+
+Render Free web services have an ephemeral filesystem and do not provide Shell/SSH access. A local `users.db` can disappear when the service spins down, restarts, or redeploys. To store new accounts reliably:
+
+1. Create a new, empty Turso database and set `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and `DATABASE_BACKEND=turso` in Render's Environment settings.
+2. Deploy this version of the app. New accounts and user data will be written to Turso. `DATABASE_PATH` is only used for local SQLite mode.
+
+If you need old data from a Free Render instance, do not redeploy until you have obtained a copy of the SQLite file. Free services have no Shell/SSH to run the migration utility against that file. If you have a backup or download, run the utility from your computer with the downloaded file and Turso credentials set in your environment:
+
+```
+python backend/migrate_render_to_turso.py --source /path/to/users.db
+```
+
+### Migrate from a Render service with Shell access
+
+For a service with Shell access and an available SQLite file, pause writes and keep `DATABASE_BACKEND=sqlite` while migrating. Create an empty Turso database, set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, then run from the repository root:
+
+```
+python backend/migrate_render_to_turso.py
+```
+
+Pass `--source /path/to/users.db` if the database is not at `DATABASE_PATH`. The script copies users, profiles, job interactions, applications, roadmap preferences, and learning progress. It preserves user IDs and password hashes, verifies row counts, and refuses to copy into tables that already contain data. After it reports the copied counts, set `DATABASE_BACKEND=turso` and redeploy. Keep the source backup until you verify existing accounts and data.
+
+The migration utility copies rows through Turso's API, so it does not require WAL mode. WAL is required for Turso's physical SQLite-file import workflow. Do not put Turso tokens in source control or paste them into chat.
+
+For local development, leave `DATABASE_BACKEND` unset (or set it to `sqlite`); the app continues to use `DATABASE_PATH`.
+
 The frontend can be served by Flask on port 8000 or by VS Code Live Server on port 5500. Live Server requests are allowed only from localhost ports 5500/127.0.0.1:5500.
 
 You can also press F5 in VS Code and choose "Run Job Recommender (Flask)". The Live Server extension on port 5500 is also supported while the Flask server is running.
