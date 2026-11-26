@@ -27,9 +27,6 @@ app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
 app.config.update(
     SECRET_KEY=os.environ.get("SECRET_KEY") or secrets.token_hex(32),
     DATABASE=os.environ.get("DATABASE_PATH", str(DATABASE)),
-    DATABASE_BACKEND=os.environ.get("DATABASE_BACKEND", "sqlite").strip().lower(),
-    TURSO_DATABASE_URL=os.environ.get("TURSO_DATABASE_URL", ""),
-    TURSO_AUTH_TOKEN=os.environ.get("TURSO_AUTH_TOKEN", ""),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "").lower() in {"1", "true", "yes"},
@@ -42,44 +39,16 @@ _csrf_token = "csrf_token"
 
 
 def _database_connection():
-    backend = app.config["DATABASE_BACKEND"]
-    if backend == "sqlite":
-        connection = sqlite3.connect(app.config["DATABASE"])
-        connection.row_factory = sqlite3.Row
-    elif backend == "turso":
-        database_url = app.config["TURSO_DATABASE_URL"]
-        auth_token = app.config["TURSO_AUTH_TOKEN"]
-        if not database_url or not auth_token:
-            raise RuntimeError(
-                "TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are required for the Turso backend."
-            )
-        try:
-            import turso_serverless
-        except ImportError as exc:
-            raise RuntimeError(
-                "Install turso-serverless to use the Turso database backend."
-            ) from exc
-        connection = turso_serverless.connect(database_url, auth_token=auth_token)
-        connection.row_factory = turso_serverless.Row
-    else:
-        raise RuntimeError("DATABASE_BACKEND must be either 'sqlite' or 'turso'.")
+    connection = sqlite3.connect(app.config["DATABASE"])
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.row_factory = sqlite3.Row
     return connection
 
 
-def _database_integrity_errors():
-    if app.config["DATABASE_BACKEND"] == "turso":
-        import turso_serverless
-
-        return (sqlite3.IntegrityError, turso_serverless.IntegrityError)
-    return (sqlite3.IntegrityError,)
-
-
 def init_db():
-    if app.config["DATABASE_BACKEND"] == "sqlite":
-        database = Path(app.config["DATABASE"])
-        database.parent.mkdir(parents=True, exist_ok=True)
-    with closing(_database_connection()) as db, db:
+    database = Path(app.config["DATABASE"])
+    database.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(database)) as db, db:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -267,7 +236,7 @@ def register():
                 (email, generate_password_hash(password)),
             )
             user_id = cursor.lastrowid
-    except _database_integrity_errors():
+    except sqlite3.IntegrityError:
         return jsonify(error="An account with that email already exists."), 409
 
     session.clear()
@@ -924,7 +893,7 @@ def create_application():
                 "SELECT * FROM applications WHERE id = ? AND user_id = ?",
                 (cursor.lastrowid, session["user_id"]),
             ).fetchone()
-    except _database_integrity_errors():
+    except sqlite3.IntegrityError:
         return jsonify(error="This job is already in your application tracker."), 409
     return jsonify(application=_application_json(row)), 201
 
